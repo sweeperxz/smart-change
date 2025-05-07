@@ -1,10 +1,10 @@
 "use client"
 
-import type React from "react"
-
+import type { FC } from "react"
 import { useState, useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ArrowDownUp, ChevronDown, CreditCard, Heart, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,23 +12,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import NavigationBar from "@/components/navigation-bar"
 
-// Типы для данных курсов валют
+// Types for exchange rates
 interface ExchangeRates {
   [key: string]: {
     [key: string]: number
   }
 }
 
-// Маппинг ID криптовалют для API CoinGecko
+// Mapping of cryptocurrency IDs for CoinGecko API
 const COIN_IDS = {
   BTC: "bitcoin",
   ETH: "ethereum",
   USDT: "tether",
-  BNB: "binancecoin", // Исправлено с "binance-coin" на "binancecoin"
+  BNB: "binancecoin",
   XRP: "ripple",
-}
+} as const
 
-export default function ExchangePage() {
+const ExchangePage: FC = () => {
   const [fromAmount, setFromAmount] = useState("1000.00")
   const [toAmount, setToAmount] = useState("")
   const [fromCurrency, setFromCurrency] = useState("USD")
@@ -36,6 +36,10 @@ export default function ExchangePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rates, setRates] = useState<ExchangeRates>({})
+  const [email, setEmail] = useState("")
+  const [emailError, setEmailError] = useState("")
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const router = useRouter()
 
   // Список поддерживаемых криптовалют
   const cryptoCurrencies = [
@@ -51,6 +55,8 @@ export default function ExchangePage() {
     { value: "USD", label: "US Dollar" },
     { value: "EUR", label: "Euro" },
     { value: "RUB", label: "Russian Ruble" },
+    { value: "KZT", label: "Kazakhstani Tenge" },
+    { value: "CNY", label: "Chinese Yuan" }
   ]
 
   // Получение курсов валют при загрузке страницы
@@ -92,12 +98,13 @@ export default function ExchangePage() {
         console.warn(`Отсутствуют данные для следующих монет: ${missingCoins.join(", ")}`)
       }
 
-      // Создаем объект с курсами обмена с проверкой наличия данных
-      const exchangeRates: ExchangeRates = {
-        USD: {},
-        EUR: {},
-        RUB: {},
-      }
+      // Initialize exchangeRates with all possible currency combinations
+      const exchangeRates: ExchangeRates = {}
+      
+      // Initialize all currency objects first
+      ;[...fiatCurrencies.map(c => c.value), ...cryptoCurrencies.map(c => c.value)].forEach(currency => {
+        exchangeRates[currency] = {}
+      })
 
       // Заполняем курсы для фиатных валют
       fiatCurrencies.forEach((fiat) => {
@@ -110,6 +117,7 @@ export default function ExchangePage() {
           // Проверяем, есть ли данные для этой монеты и валюты
           if (cryptoData[coinId] && cryptoData[coinId][fiatCode] && cryptoData[coinId][fiatCode] > 0) {
             exchangeRates[fiat.value][crypto.value] = 1 / cryptoData[coinId][fiatCode]
+            exchangeRates[crypto.value][fiat.value] = cryptoData[coinId][fiatCode]
           } else {
             // Используем фиксированные значения в случае отсутствия данных
             console.warn(`Нет данных для ${coinId}/${fiatCode}, используем резервные значения`)
@@ -119,35 +127,15 @@ export default function ExchangePage() {
               USD: { BTC: 0.000033, ETH: 0.00045, USDT: 1, BNB: 0.0033, XRP: 1.5 },
               EUR: { BTC: 0.000031, ETH: 0.00042, USDT: 0.93, BNB: 0.0031, XRP: 1.4 },
               RUB: { BTC: 0.0000003, ETH: 0.000004, USDT: 0.009, BNB: 0.00003, XRP: 0.014 },
+              KZT: { BTC: 0.0000001, ETH: 0.000002, USDT: 0.002, BNB: 0.00001, XRP: 0.003 },
+              CNY: { BTC: 0.0000043, ETH: 0.00006, USDT: 0.14, BNB: 0.00043, XRP: 0.21 }
             }
 
+            // Set both directions of the exchange rate
             exchangeRates[fiat.value][crypto.value] = fallbackRates[fiat.value][crypto.value] || 0
-          }
-        })
-      })
-
-      // Добавляем обратные курсы (крипто -> фиат)
-      cryptoCurrencies.forEach((crypto) => {
-        exchangeRates[crypto.value] = {}
-
-        fiatCurrencies.forEach((fiat) => {
-          if (
-            exchangeRates[fiat.value] &&
-            exchangeRates[fiat.value][crypto.value] &&
-            exchangeRates[fiat.value][crypto.value] > 0
-          ) {
-            exchangeRates[crypto.value][fiat.value] = 1 / exchangeRates[fiat.value][crypto.value]
-          } else {
-            // Резервные значения для обратных курсов
-            const fallbackReverseRates: Record<string, Record<string, number>> = {
-              BTC: { USD: 30000, EUR: 28000, RUB: 2800000 },
-              ETH: { USD: 2200, EUR: 2050, RUB: 205000 },
-              USDT: { USD: 1, EUR: 0.93, RUB: 93 },
-              BNB: { USD: 300, EUR: 280, RUB: 28000 },
-              XRP: { USD: 0.65, EUR: 0.61, RUB: 61 },
+            if (fallbackRates[fiat.value][crypto.value] > 0) {
+              exchangeRates[crypto.value][fiat.value] = 1 / fallbackRates[fiat.value][crypto.value]
             }
-
-            exchangeRates[crypto.value][fiat.value] = fallbackReverseRates[crypto.value][fiat.value] || 0
           }
         })
       })
@@ -161,17 +149,30 @@ export default function ExchangePage() {
       console.error("Ошибка при получении курсов валют:", err)
       setError("Не удалось загрузить актуальные курсы валют. Используются приблизительные значения.")
 
-      // Создаем резервные курсы обмена
-      const fallbackRates: ExchangeRates = {
+      // Создаем резервные курсы обмена с правильной инициализацией
+      const fallbackRates: ExchangeRates = {}
+      
+      // Initialize all currency objects first
+      ;[...fiatCurrencies.map(c => c.value), ...cryptoCurrencies.map(c => c.value)].forEach(currency => {
+        fallbackRates[currency] = {}
+      })
+
+      // Set fallback values
+      const baseFallbackRates = {
         USD: { BTC: 0.000033, ETH: 0.00045, USDT: 1, BNB: 0.0033, XRP: 1.5 },
         EUR: { BTC: 0.000031, ETH: 0.00042, USDT: 0.93, BNB: 0.0031, XRP: 1.4 },
         RUB: { BTC: 0.0000003, ETH: 0.000004, USDT: 0.009, BNB: 0.00003, XRP: 0.014 },
-        BTC: { USD: 30000, EUR: 28000, RUB: 2800000 },
-        ETH: { USD: 2200, EUR: 2050, RUB: 205000 },
-        USDT: { USD: 1, EUR: 0.93, RUB: 93 },
-        BNB: { USD: 300, EUR: 280, RUB: 28000 },
-        XRP: { USD: 0.65, EUR: 0.61, RUB: 61 },
+        KZT: { BTC: 0.0000001, ETH: 0.000002, USDT: 0.002, BNB: 0.00001, XRP: 0.003 },
+        CNY: { BTC: 0.0000043, ETH: 0.00006, USDT: 0.14, BNB: 0.00043, XRP: 0.21 }
       }
+
+      // Fill in all rates including reverse rates
+      Object.entries(baseFallbackRates).forEach(([fiat, rates]) => {
+        Object.entries(rates).forEach(([crypto, rate]) => {
+          fallbackRates[fiat][crypto] = rate
+          fallbackRates[crypto][fiat] = 1 / rate
+        })
+      })
 
       setRates(fallbackRates)
       calculateExchange(fromAmount, fromCurrency, toCurrency, fallbackRates)
@@ -245,6 +246,36 @@ export default function ExchangePage() {
   // Функция для обновления курсов
   const handleRefreshRates = () => {
     fetchExchangeRates()
+  }
+
+  const handleBuyClick = () => {
+    // Validate email
+    if (!email) {
+      setEmailError("Пожалуйста, укажите email")
+      return
+    }
+    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      setEmailError("Пожалуйста, укажите корректный email")
+      return
+    }
+    // Validate terms
+    if (!termsAccepted) {
+      setEmailError("Пожалуйста, примите условия использования")
+      return
+    }
+    // Store exchange details in sessionStorage
+    sessionStorage.setItem("exchangeDetails", JSON.stringify({
+      fromAmount,
+      toAmount,
+      fromCurrency,
+      toCurrency,
+      email,
+      rate: rates[fromCurrency]?.[toCurrency] || 0
+    }))
+    // Clear any errors
+    setEmailError("")
+    // Navigate to crypto address page
+    router.push("/exchange/crypto-address")
   }
 
   return (
@@ -367,6 +398,38 @@ export default function ExchangePage() {
                     </Button>
                   </div>
 
+                  {/* Email Input */}
+                  <div className="mb-4">
+                    <label className="block text-sm text-gray-600 mb-2">
+                      Email для связи
+                    </label>
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="your@email.com"
+                      className={emailError ? "border-red-500" : ""}
+                    />
+                    {emailError && (
+                      <p className="text-red-500 text-sm mt-1">{emailError}</p>
+                    )}
+                  </div>
+
+                  {/* Terms Checkbox */}
+                  <div className="mb-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={termsAccepted}
+                        onChange={(e) => setTermsAccepted(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-sm text-gray-600">
+                        Я принимаю условия использования
+                      </span>
+                    </label>
+                  </div>
+
                   {/* Transaction Summary */}
                   <div className="bg-gray-50 p-3 rounded-md mb-6">
                     <div className="flex justify-between text-sm">
@@ -385,6 +448,7 @@ export default function ExchangePage() {
                   <Button
                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-6"
                     disabled={loading || !!error || !toAmount}
+                    onClick={handleBuyClick}
                   >
                     {loading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
                     Купить сейчас
@@ -414,13 +478,194 @@ export default function ExchangePage() {
                 </TabsContent>
 
                 <TabsContent value="sell" className="mt-0">
-                  <div className="flex flex-col items-center justify-center py-8">
-                    <CreditCard className="h-16 w-16 text-gray-300 mb-4" />
-                    <h3 className="text-xl font-medium mb-2">Продажа криптовалюты</h3>
-                    <p className="text-gray-500 text-center mb-4">
-                      Конвертируйте ваши криптоактивы в фиатные деньги быстро и безопасно.
-                    </p>
-                    <Button className="bg-lime-400 hover:bg-lime-500 text-green-800">Скоро будет доступно</Button>
+                  <div className="space-y-6">
+                    {/* You Send */}
+                    <div>
+                      <div className="text-sm text-gray-500 mb-1">Вы отправляете</div>
+                      <div className="flex items-center border rounded-md overflow-hidden">
+                        <Input
+                          type="text"
+                          value={fromAmount}
+                          onChange={handleFromAmountChange}
+                          className="border-0 text-right flex-1"
+                          disabled={loading}
+                        />
+                        <Select value={fromCurrency} onValueChange={handleFromCurrencyChange} disabled={loading}>
+                          <SelectTrigger className="w-24 border-0 border-l border-gray-200 rounded-none">
+                            <SelectValue placeholder="BTC" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {cryptoCurrencies.map((currency) => (
+                              <SelectItem key={currency.value} value={currency.value}>
+                                {currency.value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* You Receive */}
+                    <div>
+                      <div className="text-sm text-gray-500 mb-1">Вы получите</div>
+                      <div className="flex items-center border rounded-md overflow-hidden">
+                        <Input
+                          type="text"
+                          value={loading ? "Загрузка..." : toAmount}
+                          readOnly
+                          className="border-0 text-right flex-1"
+                        />
+                        <Select value={toCurrency} onValueChange={handleToCurrencyChange} disabled={loading}>
+                          <SelectTrigger className="w-24 border-0 border-l border-gray-200 rounded-none">
+                            <SelectValue placeholder="USD" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fiatCurrencies.map((currency) => (
+                              <SelectItem key={currency.value} value={currency.value}>
+                                {currency.value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Swap Button */}
+                    <div className="flex justify-center -mt-3 mb-3">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full h-8 w-8 border-gray-300"
+                        onClick={handleSwapCurrencies}
+                        disabled={loading}
+                      >
+                        <ArrowDownUp className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Bank Account Details */}
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm text-gray-600 mb-2">
+                          Номер банковской карты для получения средств
+                        </label>
+                        <Input
+                          type="text"
+                          placeholder="0000 0000 0000 0000"
+                          className="font-mono"
+                          maxLength={19}
+                          onChange={(e) => {
+                            const value = e.target.value.replace(/\D/g, '')
+                            e.target.value = value.replace(/(\d{4})/g, '$1 ').trim()
+                          }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm text-gray-600 mb-2">
+                            Срок действия
+                          </label>
+                          <Input
+                            type="text"
+                            placeholder="ММ/ГГ"
+                            maxLength={5}
+                            onChange={(e) => {
+                              let value = e.target.value.replace(/\D/g, '')
+                              if (value.length >= 2) {
+                                value = value.slice(0, 2) + '/' + value.slice(2)
+                              }
+                              e.target.value = value
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-600 mb-2">
+                            CVV
+                          </label>
+                          <Input
+                            type="password"
+                            placeholder="***"
+                            maxLength={3}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Email Input */}
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-2">
+                        Email для связи
+                      </label>
+                      <Input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="your@email.com"
+                        className={emailError ? "border-red-500" : ""}
+                      />
+                      {emailError && (
+                        <p className="text-red-500 text-sm mt-1">{emailError}</p>
+                      )}
+                    </div>
+
+                    {/* Terms Checkbox */}
+                    <div>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={termsAccepted}
+                          onChange={(e) => setTermsAccepted(e.target.checked)}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="text-sm text-gray-600">
+                          Я принимаю условия использования
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Transaction Summary */}
+                    <div className="bg-gray-50 p-3 rounded-md">
+                      <div className="flex justify-between text-sm">
+                        <div>Вы получите</div>
+                        <div className="font-medium">
+                          {loading ? "Загрузка..." : `${toAmount} ${toCurrency} за ${fromAmount} ${fromCurrency}`}{" "}
+                          <ChevronDown className="h-4 w-4 inline" />
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Комиссия сервиса: 2% ({(Number(fromAmount) * 0.02).toFixed(8)} {fromCurrency}) • Время обработки: ~15 мин
+                      </div>
+                    </div>
+
+                    {/* Sell Button */}
+                    <Button 
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-6"
+                      disabled={loading || !!error || !toAmount}
+                      onClick={handleBuyClick}
+                    >
+                      {loading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
+                      Продать сейчас
+                    </Button>
+
+                    {/* Supported Payment Methods */}
+                    <div className="mt-4">
+                      <div className="flex justify-center gap-2 mb-2">
+                        <div className="w-10 h-6 bg-blue-600 rounded flex items-center justify-center text-white text-xs">
+                          VISA
+                        </div>
+                        <div className="w-10 h-6 bg-red-500 rounded flex items-center justify-center text-white text-xs">
+                          MC
+                        </div>
+                        <div className="w-10 h-6 bg-yellow-500 rounded flex items-center justify-center text-white text-xs">
+                          UP
+                        </div>
+                        <div className="w-10 h-6 bg-gray-800 rounded flex items-center justify-center text-white text-xs">
+                          MIR
+                        </div>
+                      </div>
+                      <div className="text-xs text-center text-gray-500">Supported Banks</div>
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>
@@ -508,3 +753,5 @@ export default function ExchangePage() {
     </main>
   )
 }
+
+export default ExchangePage
